@@ -1352,6 +1352,13 @@ impl Bindgen for FunctionBindgen<'_, '_> {
             Instruction::Malloc { .. } => unimplemented!(),
 
             Instruction::GuestDeallocate { size, align } => {
+                // In an export, `GuestDeallocate` frees only the block of
+                // indirect parameters. For an async export, `CallInterface`
+                // already frees that block, so a second free is a bug.
+                assert!(
+                    self.async_params_block.is_none(),
+                    "the parameter block of an async export is freed twice"
+                );
                 self.deallocate(&operands[0], *size, *align);
             }
 
