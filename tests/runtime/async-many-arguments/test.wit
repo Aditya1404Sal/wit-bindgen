@@ -1,0 +1,60 @@
+//@ async = true
+package my:test;
+
+interface i {
+  // Nine strings flatten to 18 core values. That is more than the 16 that an
+  // export can take directly, so the caller writes the arguments into a block
+  // in the callee's memory. The callee owns that block and must free it.
+  many-arguments: async func(
+    a: string,
+    b: string,
+    c: string,
+    d: string,
+    e: string,
+    f: string,
+    g: string,
+    h: string,
+    i: string,
+  );
+
+  // A future and eight strings flatten to 17 core values, so these arguments
+  // also go in a block. The call waits on `x`, so the caller can cancel it
+  // while it runs.
+  many-arguments-pending: async func(
+    x: future,
+    a: string,
+    b: string,
+    c: string,
+    d: string,
+    e: string,
+    f: string,
+    g: string,
+    h: string,
+  );
+
+  // An option and a result read their payload only for the case that is
+  // present. With six strings they flatten to 2 + 3 + 12 = 17 core values, so
+  // these arguments also go in a block.
+  many-arguments-cases: async func(
+    a: option<u32>,
+    b: result<u32, string>,
+    c: string,
+    d: string,
+    e: string,
+    f: string,
+    g: string,
+    h: string,
+  );
+
+  allocated-bytes: func() -> u32;
+}
+
+world test {
+  export i;
+}
+
+world runner {
+  import i;
+
+  export run: async func();
+}
