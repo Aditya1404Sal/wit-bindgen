@@ -36,10 +36,6 @@ pub(super) struct FunctionBindgen<'a, 'b> {
     pub(super) outline_lowers: bool,
     pub(super) lower_cleanup: Option<&'static str>,
     pub(super) outline_deallocations: bool,
-    /// Set for an async export whose parameters arrive in a block of memory:
-    /// the size and alignment of that block. The call frees the block after
-    /// it has read the arguments and before it waits on the method.
-    pub(super) async_params_block: Option<ElementInfo>,
 }
 
 pub const POINTER_SIZE_EXPRESSION: &str = "::core::mem::size_of::<*const u8>()";
@@ -70,7 +66,6 @@ impl<'a, 'b> FunctionBindgen<'a, 'b> {
             outline_lowers: false,
             lower_cleanup: None,
             outline_deallocations: false,
-            async_params_block: None,
         }
     }
 
@@ -999,7 +994,12 @@ impl Bindgen for FunctionBindgen<'_, '_> {
                 self.push_str(");\n");
             }
 
-            Instruction::CallInterface { func, async_ } => {
+            Instruction::CallInterface {
+                func,
+                async_,
+                params_block,
+            } => {
+                let block = params_block.map(|info| (operands.pop().unwrap(), info));
                 let prev_src = mem::replace(self.src.as_mut_string(), String::new());
 
                 self.let_results(usize::from(func.result.is_some()), results);
@@ -1081,20 +1081,21 @@ impl Bindgen for FunctionBindgen<'_, '_> {
                     }
                 }
                 call.push_str(")");
-                match self.async_params_block {
+                let await_ = if *async_ { ".await" } else { "" };
+                match block {
                     // The arguments of this async export arrived in a block of
                     // memory. Creating the future reads every argument out of
                     // that block, so free it before the first `.await`. Then a
-                    // call that is cancelled while it waits frees it too.
-                    Some(ElementInfo { size, align }) if *async_ => {
+                    // call that is cancelled while it waits frees it too. Core
+                    // announces the block only for async exports today, and
+                    // this arm frees it for any call that carries one.
+                    Some((ptr, (size, align))) => {
                         let tmp = self.tmp();
                         uwriteln!(self.src, "let call{tmp} = {call};");
-                        let ptr = self.params[0].clone();
                         self.deallocate(&ptr, size, align);
-                        self.push_str(&format!("{prefix}call{tmp}.await{suffix}"));
+                        self.push_str(&format!("{prefix}call{tmp}{await_}{suffix}"));
                     }
-                    _ => {
-                        let await_ = if *async_ { ".await" } else { "" };
+                    None => {
                         self.push_str(&format!("{prefix}{call}{await_}{suffix}"));
                     }
                 }
@@ -1352,13 +1353,6 @@ impl Bindgen for FunctionBindgen<'_, '_> {
             Instruction::Malloc { .. } => unimplemented!(),
 
             Instruction::GuestDeallocate { size, align } => {
-                // In an export, `GuestDeallocate` frees only the block of
-                // indirect parameters. For an async export, `CallInterface`
-                // already frees that block, so a second free is a bug.
-                assert!(
-                    self.async_params_block.is_none(),
-                    "the parameter block of an async export is freed twice"
-                );
                 self.deallocate(&operands[0], *size, *align);
             }
 

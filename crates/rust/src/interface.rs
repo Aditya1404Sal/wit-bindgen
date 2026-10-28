@@ -1496,16 +1496,6 @@ unsafe fn call_import(&mut self, _params: Self::ParamsLower, _results: *mut u8) 
         } else {
             AbiVariant::GuestExport
         };
-        // `abi::call` frees a block of indirect parameters only for sync
-        // exports. An async export frees it in the call itself.
-        let sig = f.r#gen.resolve.wasm_signature(variant, func);
-        if async_ && sig.indirect_params {
-            f.async_params_block = Some(
-                f.r#gen
-                    .sizes
-                    .record(func.params.iter().map(|param| &param.ty)),
-            );
-        }
         abi::call(
             f.r#gen.resolve,
             variant,
